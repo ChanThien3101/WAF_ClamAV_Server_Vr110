@@ -1,0 +1,769 @@
+Hướng dẫn cài đặt máy chủ elkMonitoring (máy giám sát) version 7.x
+---------------------------------------------
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo timedatectl set-timezone Asia/Ho_Chi_Minh
+---------------------------
+#Cài đặt java 8 jdk
+sudo apt install -y openjdk-8-jdk
+----------------
+#Cài đặt elasticsearch
+sudo apt-get install apt-transport-https
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-7.x.list
+sudo apt-get update && sudo apt-get install elasticsearch
+
+#cấu hình elasticsearch
+sudo nano /etc/elasticsearch/elasticsearch.yml
+# comment cái này #network.host: 192.168.0.1 và thêm dòng này bên dưới network.host
+network.bind_host: ["127.0.0.1", "địa_chỉ_ip_elk_monitoring (ip máy giám sát)"]
+
+
+#thêm cuối dòng:
+discovery.type: single-node
+
+#thêm vào cuối dòng:
+xpack.security.enabled: true
+xpack.security.authc.api_key.enabled: true
+
+sudo systemctl enable elasticsearch
+sudo systemctl start elasticsearch
+# kiểm tra trạng thái elasticsearch
+sudo systemctl status elasticsearch
+
+systemctl restart elasticsearch
+
+#tiến hành nhập mật khẩu các loại (nhập mật khẩu bạn muốn)
+/usr/share/elasticsearch/bin/elasticsearch-setup-passwords interactive
+
+
+#kiểm tra thông tin của elasticsearch
+sudo apt-get install -y curl
+curl -X GET "localhost:9200"
+#hoặc nếu đã cài mật khẩu
+curl -u elastic:password -X GET "localhost:9200" 
+
+
+#kiểm tra các port, ip, giao thức
+apt install net-tools
+netstat -plntu 
+------------------
+
+#cài đặt Kibana theo gpt plush
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+sudo sh -c 'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" > /etc/apt/sources.list.d/elastic-7.x.list'
+sudo apt update
+sudo apt install kibana
+
+#cấu hình kibana
+sudo nano /etc/kibana/kibana.yml
+#sửa
+server.host: "0.0.0.0"
+
+#cấu hình kibana
+nano /etc/kibana/kibana.yml
+#sửa
+elasticsearch.hosts: ["http://192.168.226.135:9200"]
+elasticsearch.username: "elastic"
+elasticsearch.password: "your_password_here"
+
+sudo systemctl enable kibana
+sudo systemctl start kibana
+sudo systemctl restart kibana
+#kiểm tra kibana
+netstat –plntu 
+
+#chạy thử trong browser: http://192.168.226.135:5601
+-----------------
+
+#Cài đặt logstash theo gpt plush
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+sudo sh -c 'echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" > /etc/apt/sources.list.d/elastic-7.x.list'
+sudo apt update
+sudo apt install logstash
+
+# tạo 1 file có tên là 01_logstash.conf
+nano /etc/logstash/conf.d/01_logstash.conf
+#cấu hình trong file đấy bằng đoạn code sau
+input {
+  beats {
+    port => 5044
+  }
+}
+
+filter {
+  if [fields][log_type] == "apache_access" {
+    grok {
+      match => { "message" => "%{COMMONAPACHELOG}" }
+    }
+  }
+  
+  if [fields][log_type] == "mod_secu" {
+    grok {
+      match => { "message" => "%{COMBINEDAPACHELOG}" }
+    }
+  }
+}
+
+output {
+  if [fields][log_type] == "apache_access" {
+    elasticsearch {
+      hosts => ["http://192.168.226.135:9200"]
+      index => "apache_access-%{+YYYY.MM.dd}"
+      user => "elastic"
+      password => "310102"
+    }
+  }
+  
+  if [fields][log_type] == "mod_secu" {
+    elasticsearch {
+      hosts => ["http://192.168.226.135:9200"]
+      index => "mod_secu-%{+YYYY.MM.dd}"
+      user => "elastic"
+      password => "310102"
+    }
+  }
+}
+
+#tiến hành enable logstash
+sudo systemctl enable logstash
+sudo systemctl start logstash
+sudo systemctl restart logstash
+sudo systemctl enable logstash
+
+#kiểm tra logstash
+sudo tail -f /var/log/logstash/logstash-plain.log
+
+------------------------------
+Đến đây, ta đã cài đặt và cấu hình xong elk_stack
+
+
+_________________________________________________________________________
+
+#cấu hình theo dõi lưu lượng truy cập web cho filebeat
+
+
+
+#bật modules apache cho filebeat
+filebeat modules enable apache
+
+nano /etc/filebeat/filebeat.yml
+
+#thêm
+
+filebeat.inputs:
+- type: log
+  enabled: true
+  id: apache-access-log
+  paths:
+    - /var/log/apache2/access.log
+  fields:
+    log_type: apache_access
+
+- type: log
+  enabled: true
+  id: modsecurity-error-log
+  paths:
+    - /var/log/apache2/error.log	
+  fields:
+    log_type: modsecu_error
+
+- type: log
+  enabled: true
+  id: modsecurity-audit-log
+  paths:
+    - /var/log/modsecurity/modsec_audit.log	
+  fields:
+    log_type: modsecu_audit
+
+
+output.logstash:
+  # The Logstash hosts
+  hosts: ["192.168.226.135:5044"]
+
+#bên dưới có thể bỏ qua nếu sử dụng logstash
+output.elasticsearch:
+  # Array of hosts to connect to.
+  hosts: ["192.168.226.135:9200"]
+  username: "elastic"
+  password: "310102"
+---=------
+#dành cho docker
+filebeat test config
+filebeat test output
+systemctl start filebeat 
+systemctl restart filebeat 
+systemctl status filebeat 
+
+
+_____________________________________________________
+#tắt giao diện ubuntu
+sudo systemctl stop gdm3
+sudo systemctl disable gdm3
+sudo reboot
+
+#Cách mở Terminal sau khi dừng giao diện đồ họa:
+#Nhấn tổ hợp phím Ctrl + Alt + F3 (hoặc F2, F4, F5, F6). Điều này sẽ đưa bạn đến một màn hình TTY khác.
+
+#Trên màn hình này, bạn sẽ thấy yêu cầu nhập tên đăng nhập và mật khẩu.
+#Đăng nhập bằng tài khoản của bạn (tên đăng nhập và mật khẩu thông thường).
+#Sau khi đăng nhập thành công, bạn sẽ có một terminal để thực thi các lệnh của mình.
+
+#bật giao diện ubuntu
+sudo systemctl start gdm3
+
+__________________________________________
+
+Tiếp đến, ta cài đặt beats để gửi log lên máy client (hoặc máy cần được giám sát). Việc này tùy các bạn lựa chọn
+mô hình elk. Dưới đây mình chọn cài filebeat ở máy client để gửi log từ client về elk server
+
+#cấu hình waf
+
+#tạo file cấu hình modsecurity
+nano modsec_rules.conf
+
+#thêm
+Include "/etc/apache2/modsecurity.d/modsecurity.conf"
+Include "/etc/apache2/modsecurity.d/owasp-crs/crs-setup.conf"
+Include "/etc/apache2/modsecurity.d/owasp-crs/rules/*.conf"
+
+#tạo file default
+nano 000-default.conf
+#thêm
+<VirtualHost *:80>
+	modsecurity on
+	modsecurity_rules_file /etc/apache2/modsecurity.d/modsec_rules.conf 
+	ServerAdmin webmaster@localhost
+	DocumentRoot /var/www/html
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
+
+
+#file cài đặt init.sh
+
+#!/bin/bash
+
+# Dừng chương trình ngay lập tức nếu có lỗi xảy ra
+set -e
+
+# Cập nhật và cài đặt các gói phần mềm cần thiết
+echo "Updating and installing necessary packages..."
+sudo apt update && sudo apt upgrade -y && \
+    sudo apt install -y apt-utils apache2 mariadb-server php mariadb-client php-mysql php-mysqli php-gd \
+    libapache2-mod-php nano apt-transport-https gnupg2 g++ flex bison curl apache2-dev doxygen libyajl-dev ssdeep \
+    lua5.2 liblua5.2-dev libgeoip-dev libtool dh-autoreconf libcurl4-gnutls-dev libxml2 libpcre++-dev libpcre2-dev \
+    libxml2-dev libjansson-dev git wget tar autoconf automake pkg-config clamav clamav-daemon logrotate libssl-dev \
+    zlib1g-dev build-essential libmaxminddb-dev libluajit-5.1-dev perl libperl-dev checkinstall cmake valgrind \
+    libbz2-dev libjson-c-dev libboost-all-dev libpcre3-dev libsqlite3-dev libprotobuf-dev libzmq3-dev
+
+
+# Thêm GPG key và repo của Elasticsearch để cài đặt Filebeat và Packetbeat
+echo "Adding Elasticsearch GPG key and repository..."
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-7.x.list
+sudo apt update
+sudo apt install -y filebeat packetbeat libpcap0.8
+
+# Clone và xây dựng ModSecurity
+echo "Cloning and building ModSecurity..."
+git clone https://github.com/owasp-modsecurity/ModSecurity.git
+cd ModSecurity
+git submodule init
+git submodule update --recursive
+chmod +x build.sh
+./build.sh
+./configure
+make
+sudo make install
+cd ..
+
+# Cài đặt ModSecurity-Apache Connector
+echo "Cloning and building ModSecurity-Apache connector..."
+git clone https://github.com/SpiderLabs/ModSecurity-apache.git
+cd ModSecurity-apache
+chmod +x autogen.sh
+./autogen.sh
+./configure --with-libmodsecurity=/usr/local/modsecurity/
+make
+sudo make install
+
+# Load ModSecurity vào Apache
+echo "Loading ModSecurity module into Apache..."
+echo "LoadModule security3_module /usr/lib/apache2/modules/mod_security3.so" | sudo tee -a /etc/apache2/apache2.conf
+cd ..
+
+# Cấu hình ModSecurity
+echo "Configuring ModSecurity..."
+sudo mkdir /etc/apache2/modsecurity.d
+sudo cp ModSecurity/modsecurity.conf-recommended /etc/apache2/modsecurity.d/modsecurity.conf
+sudo cp ModSecurity/unicode.mapping /etc/apache2/modsecurity.d/
+sudo sed -i 's/SecRuleEngine DetectionOnly/SecRuleEngine On/' /etc/apache2/modsecurity.d/modsecurity.conf
+
+# Cài đặt và cấu hình OWASP CRS
+echo "Installing OWASP CRS..."
+git clone https://github.com/coreruleset/coreruleset.git /etc/apache2/modsecurity.d/owasp-crs
+sudo cp /etc/apache2/modsecurity.d/owasp-crs/crs-setup.conf.example /etc/apache2/modsecurity.d/owasp-crs/crs-setup.conf
+
+# Cập nhật file cấu hình Apache và ModSecurity
+echo "Updating Apache and ModSecurity configuration files..."
+sudo mv /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf.old
+sudo cp ./confModsecurity/000-default.conf /etc/apache2/sites-available/
+sudo cp ./confModsecurity/modsec_rules.conf /etc/apache2/modsecurity.d/
+
+#copy source web
+sudo cp -r ./src/WEB/* /var/www/html/
+sudo rm -rf /var/www/html/index.html
+sudo chown -R www-data:www-data /var/www/html/*
+
+# Cài đặt phpMyAdmin
+echo "Installing phpMyAdmin..."
+sudo apt install -y phpmyadmin
+
+# Cấu hình phpMyAdmin với Apache
+echo "Configuring phpMyAdmin for Apache..."
+# Tạo liên kết tượng trưng cho phpMyAdmin trong thư mục /var/www/html
+sudo ln -s /usr/share/phpmyadmin /var/www/html/phpmyadmin
+
+# Cấu hình phpMyAdmin sử dụng MariaDB
+echo "Configuring phpMyAdmin with MariaDB..."
+# Sửa file cấu hình phpMyAdmin để nó sử dụng MariaDB
+sudo sed -i "s/\$cfg\['Servers'\]\[\$i\]\['host'\] = 'localhost';/\$cfg\['Servers'\]\[\$i\]\['host'\] = '127.0.0.1';/" /etc/phpmyadmin/config.inc.php
+# Thêm quyền cho apache để truy cập thư mục phpMyAdmin
+sudo chown -R www-data:www-data /var/www/html/phpmyadmin
+sudo systemctl restart apache2
+
+#stop clamav-freshclam
+sudo systemctl stop clamav-freshclam
+# Cấu hình ClamAV
+echo "Configuring ClamAV..."
+sudo sed -i 's/^Example/#Example/' /etc/clamav/clamd.conf
+sudo sed -i 's/^#LocalSocket \/var\/run\/clamav\/clamd.ctl/LocalSocket \/var\/run\/clamav\/clamd.ctl/' /etc/clamav/clamd.conf
+echo "ConcurrentDatabaseReload no" | sudo tee -a /etc/clamav/clamd.conf
+echo "TestDatabases no" | sudo tee -a /etc/clamav/freshclam.conf
+
+# Tạo file log cho ClamAV và cấp quyền
+echo "Creating ClamAV log and setting permissions..."
+sudo touch /var/log/clamav/clamav.log
+sudo chown clamav:clamav /var/log/clamav/clamav.log
+
+# Cập nhật cơ sở dữ liệu ClamAV
+echo "Updating ClamAV database..."
+sudo freshclam
+
+# Cấu hình logrotate cho ClamAV
+echo "Configuring logrotate for ClamAV..."
+sudo cp ./clamav-logrotate.conf /etc/logrotate.d/clamav
+sudo cp ./my_custom.cnf /etc/mysql/mariadb.conf.d/99-custom.cnf
+
+# Cấu hình các dịch vụ khởi động cùng hệ thống
+echo "Enabling services to start on boot..."
+sudo systemctl enable apache2
+sudo systemctl enable mariadb
+sudo systemctl enable clamav-daemon
+sudo systemctl enable filebeat
+
+# Mở cổng 80 và 3310
+echo "Configuring firewall..."
+sudo ufw allow 80/tcp
+sudo ufw allow 3310/tcp
+
+# Khởi động Apache
+echo "Starting Apache..."
+sudo systemctl start apache2
+
+# Khởi động MariaDB
+echo "Starting MariaDB..."
+sudo systemctl start mariadb
+
+# Khởi động ClamAV Daemon
+echo "Starting ClamAV daemon..."
+sudo systemctl start clamav-daemon
+
+# Khởi động Filebeat
+echo "Starting Filebeat..."
+sudo systemctl start filebeat
+
+# (Tuỳ chọn) Khởi động Packetbeat nếu cần
+# echo "Starting Packetbeat..."
+# sudo systemctl start packetbeat
+
+# Kiểm tra trạng thái MariaDB và khởi động nếu cần
+echo "Checking MariaDB status..."
+if ! systemctl is-active --quiet mariadb; then
+    echo "MariaDB is not running. Starting MariaDB..."
+    sudo systemctl start mariadb
+fi
+
+# Thực thi file initWebTD.sql để triển khai database và user
+echo "Running initWebTD.sql script..."
+
+# Kiểm tra xem file initWebTD.sql có tồn tại không
+if [ ! -f "$(pwd)/initWebTD.sql" ]; then
+    echo "initWebTD.sql file not found! Exiting..."
+    exit 1
+fi
+
+# Thực thi file SQL với MySQL/MariaDB
+sudo mysql -u root -e "source $(pwd)/initWebTD.sql"
+
+# Kiểm tra xem có lỗi không và báo kết quả
+if [ $? -eq 0 ]; then
+    echo "Database setup completed successfully!"
+else
+    echo "Error during database setup."
+    exit 1
+fi
+
+# Kết thúc
+echo "Server setup complete!"
+
+
+-----------------------------------------
+tiến hành chỉnh sửa 1 chút cho container chứa modsecurity
+#tắt quy tắc đánh dấu bất kỳ yêu cầu nào có Hosttiêu đề chứa địa chỉ IP số thay vì tên miền
+nano /etc/apache2/modsecurity.d/modsecurity.conf
+
+#tắtchặn ip
+SecRuleRemoveById 920350
+SecRuleRemoveById 933150
+
+
+________________________________________________
+
+#Truy cập vào mysql hoặc mariadb
+
+sudo mysql -u root
+ALTER USER 'root'@'localhost' IDENTIFIED BY '310102'; 
+FLUSH PRIVILEGES;
+
+
+#xem cấu hình
+SHOW VARIABLES LIKE 'sql_mode';
+
+
+#nếu thấy chế độ not null chưa được tắt thì tiến hành tắt chế độ not null
+nano /etc/mysql/mariadb.conf.d/50-server.cnf
+
+#thêm cuối dòng:
+[mysqld]
+sql_mode=ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+___________________________________________________________________________________________________________________________________________
+
+
+#cài đặt ssh
+
+sudo apt update
+sudo apt upgrade -y
+sudo apt install openssh-server
+sudo systemctl status ssh
+sudo systemctl enable ssh
+
+gedit /etc/ssh/sshd_config
+#sửa:
+PasswordAuthentication yes
+PermitRootLogin yes
+Port xxxx
+
+sudo systemctl restart ssh
+
+ssh-keygen -R 192.168.226.135
+ssh-keygen -R [192.168.226.135]:2229
+ssh-keygen -R [192.168.239.135]:2230
+
+
+
+______________________________________________
+
+#cài đặt iptables
+sudo apt install iptables
+
+#cài đặt và cấu hình ipset
+sudo apt update
+sudo apt install ipset
+
+#Tạo danh sách ipset để chặn IP
+sudo ipset create blocklistip hash:ip timeout 3600
+
+#Cấu hình iptables để sử dụng ipset
+sudo iptables -A INPUT -m set --match-set blocklistip src -j DROP
+
+#Lưu lại các quy tắc của iptables
+sudo mkdir -p /etc/iptables
+sudo iptables-save > /etc/iptables/rules.v4
+
+#Lưu danh sách ipset để lưu và phục hồi danh sách ipset khi khởi động lại
+sudo ipset save > /etc/ipset.rules
+--------------------------------
+#Tạo và kích hoạt dịch vụ Systemd để phục hồi ipset khi khởi động lại
+sudo nano /etc/systemd/system/ipset-restore.service
+
+#nhập vào:
+[Unit]
+Description=Restore ipset rules
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "/sbin/ipset restore -file /etc/ipset.rules"
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+
+
+#Kích hoạt và khởi động dịch vụ
+sudo systemctl daemon-reload
+sudo systemctl enable ipset-restore.service
+sudo systemctl start ipset-restore.service
+kiểm tra trạng thái:
+sudo systemctl status ipset-restore.service
+
+-------------------
+
+#Tạo một dịch vụ systemd để lưu danh sách ipset khi hệ thống tắt
+#Tạo một script để lưu danh sách ipset
+sudo nano /usr/local/bin/ipset-save.sh
+
+#thêm nội dung sau:
+#!/bin/bash
+# Lưu danh sách ipset vào file
+/sbin/ipset save > /etc/ipset.rules
+
+#cấp quyền thực thi
+sudo chmod +x /usr/local/bin/ipset-save.sh
+
+#Tạo một dịch vụ systemd để chạy script khi hệ thống tắt
+sudo nano /etc/systemd/system/ipset-save.service
+
+#thêm nội dung sau:
+[Unit]
+Description=Save ipset rules
+DefaultDependencies=no
+Before=shutdown.target reboot.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ipset-save.sh
+
+[Install]
+WantedBy=halt.target reboot.target
+
+#kích hoạt dịch vụ:
+sudo systemctl daemon-reload
+sudo systemctl enable ipset-save.service
+sudo systemctl status ipset-save.service
+
+--------------------
+#Tạo một script để lưu lại các quy tắc iptables
+sudo nano /usr/local/bin/iptables-save.sh
+
+#thêm
+#!/bin/bash
+# Lưu lại quy tắc iptables
+/sbin/iptables-save > /etc/iptables/rules.v4
+
+#cấp quyền
+sudo chmod +x /usr/local/bin/iptables-save.sh
+
+#Tạo một dịch vụ systemd để gọi script lưu iptables khi hệ thống tắt hoặc khởi động lại.
+sudo nano /etc/systemd/system/iptables-save.service
+
+#thêm
+[Unit]
+Description=Save iptables rules
+DefaultDependencies=no
+Before=shutdown.target reboot.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/iptables-save.sh
+
+[Install]
+WantedBy=halt.target reboot.target
+
+#Kích hoạt dịch vụ iptables-save.service
+sudo systemctl daemon-reload
+sudo systemctl enable iptables-save.service
+sudo systemctl start iptables-save.service
+sudo systemctl status iptables-save.service
+
+-------------------------
+
+#Tạo một dịch vụ systemd để khôi phục danh sách iptables khi khởi động lại
+sudo nano /usr/local/bin/iptables-restore.sh
+
+#thêm
+#!/bin/bash
+# Khôi phục quy tắc iptables từ rules.v4
+/sbin/iptables-restore < /etc/iptables/rules.v4
+
+#cấp quyền:
+sudo chmod +x /usr/local/bin/iptables-restore.sh
+
+#Tạo dịch vụ systemd để khôi phục iptables
+sudo nano /etc/systemd/system/iptables-restore.service
+
+#thêm
+[Unit]
+Description=Restore iptables rules
+DefaultDependencies=no
+After=network.target ipset-restore.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/iptables-restore.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+
+#Kích hoạt và khởi động dịch vụ
+sudo systemctl daemon-reload
+sudo systemctl enable iptables-restore.service
+sudo systemctl start iptables-restore.service
+sudo systemctl status iptables-restore.service
+
+
+
+----------------------------
+
+#Chỉnh sửa file sudoers để cho phép người dùng ModSecurity (ví dụ: www-data) chạy lệnh mà không cần mật khẩu
+sudo visudo
+#Thêm dòng sau để cho phép www-data chạy script mà không cần mật khẩu:
+www-data ALL=(ALL) NOPASSWD: /sbin/ipset add blocklistip * timeout *
+
+-- Validate the IP address format
+function is_valid_ip(ip)
+    if ip:match("^%d+%.%d+%.%d+%.%d+$") then
+        for octet in ip:gmatch("%d+") do
+            if tonumber(octet) > 255 then
+                return false
+            end
+        end
+        return true
+    end
+    return false
+end
+
+-- Validate the ban time
+function is_valid_ban_time(ban_time)
+    -- The ban time must be a positive integer and not exceed 86400 seconds (24 hours)
+    if tonumber(ban_time) and tonumber(ban_time) > 0 and tonumber(ban_time) <= 86400 then
+        return true
+    end
+    return false
+end
+
+function main()
+    -- Retrieve the IP address from ModSecurity
+    local ip = m.getvar("REMOTE_ADDR")
+    if not ip or not is_valid_ip(ip) then
+        return nil -- Invalid IP
+    end
+
+    -- Retrieve the ban time (configurable via ModSecurity or use the default)
+    local ban_time = 3600
+    if not is_valid_ban_time(ban_time) then
+        return nil -- Invalid ban time
+    end
+
+    -- Construct the ipset command
+    local command = string.format("sudo /sbin/ipset add blocklistip %s timeout %d", ip, ban_time)
+
+    -- Execute the command
+    local result = os.execute(command)
+
+    -- Check the execution result
+    if result ~= 0 then
+        return nil -- Error while executing the ipset command
+    end
+
+    return nil -- Success
+end
+
+
+
+
+
+
+
+
+
+------------------------------
+#kiểm tra lỗi
+sudo journalctl -xe
+
+#kiểm tra ipset
+sudo ipset list blocklistip
+#kiểm tra ipset hoạt động trong iptables chưa
+sudo iptables -L -v -n
+
+
+#khôi phục ipset(thủ công)
+sudo ipset restore -file /etc/ipset.rules
+
+#khôi phục iptables (thủ công)
+sudo iptables-restore < /etc/iptables/rules.v4
+
+
+#khởi động lại để tets
+sudo reboot
+#Kiểm tra lại file ipset.rules
+cat /etc/ipset.rules
+
+
+sudo ipset add blocklistip 192.168.1.100
+sudo ipset del blocklistip 192.168.1.37
+
+
+#thiết lập quyền cho plugin
+sudo chown -R www-data:www-data /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-dos-protection-modsecurity
+
+
+__________________________________________________
+
+
+cd /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-dos-protection-modsecurity/plugins/
+
+cat /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-dos-protection-modsecurity/plugins/blockListIP.txt
+
+nano /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-dos-protection-modsecurity/plugins/blockListIP.txt
+
+nano /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-dos-protection-modsecurity/plugins/dos-protection-config.conf
+
+nano /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-dos-protection-modsecurity/plugins/save_ip_to_blocklist.lua
+
+
+
+----------------------------------
+#thiết lập quyền cho plugin
+sudo chown -R www-data:www-data /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-antivirus-clamav-modsecurity
+
+nano /etc/apache2/modsecurity.d/modsec_rules.conf
+
+nano /etc/apache2/modsecurity.d/modsecurity.conf
+
+systemctl restart apache2
+
+#xem log 
+sudo apache2ctl configtest
+
+tail -f /var/log/modsecurity/modsec_audit.log
+	 	
+tail -f /var/log/apache2/error.log
+
+cd /var/www/html/assets/uploads/attach/
+ls /var/www/html/assets/uploads/attach/
+
+cd /etc/apache2/modsecurity.d/owasp-crs/plugins/plugin-antivirus-clamav-modsecurity/plugins
+
+ls -la /opt/modsecurity/var/upload/
+
+
+
+
+
+
+
+
