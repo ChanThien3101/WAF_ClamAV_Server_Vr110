@@ -26,7 +26,7 @@ echo "Cloning and building ModSecurity..."
 git clone https://github.com/owasp-modsecurity/ModSecurity.git
 cd ModSecurity
 git submodule init
-git submodule update --recursive
+git submodule update --init --recursive
 chmod +x build.sh
 ./build.sh
 ./configure
